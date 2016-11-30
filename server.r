@@ -7,61 +7,23 @@ library(tools)
 library (leaflet)
 library(shiny)
 library(ggplot2)
+library(webshot)
 server<-shinyServer(function(input, output){
   
   #IMPORT DATA
-  output$text1<-renderText({ "research the 2016 election using cool tab"})
-
-  #IMPORT ELECTION DATA 2016
-  get2016<-reactive({
-    data <- read.csv("nc_cty_votes_16.csv", header = T, sep = ",")
-    data$FIPS_county <- sprintf("%03d", data$FIPS_county)
-    data <- rename(data, COUNTYFP = FIPS_county)
-    
-    data$TrumpWin <- data$Trump > data$Clinton
-    data$TrumpWinRatio <- data$Trump/data$Clinton
-    data$nVotes <- data$Trump + data$Clinton
-    data$TrumpPct <- data$Trump/data$nVotes * 100
-    data$ClintonPct <- data$Clinton/data$nVotes * 100
-    data$TrumpPctVictory <- data$TrumpPct - data$ClintonPct
-    
-    data$winner <- "Hillary"
-    data$winner[data$TrumpWin==1] <- "Trump"
-    data<-data
-  })
+  output$text1<-renderText({ "research the 2016 election using custom metrics and color schemes"})
+  output$text2<-renderText({ "for the customt tab , select your area for data and see the heatmap on custom sdie wrok"})
   
+  #IMPORT ELECTION DATA 2016
+ 
+
   
   #IMPORT ELECTION DATA 2012
-get2012<-reactive({
-    data<-get2016()
-    data12 <- read.csv(file = "US_elect_county.csv")
-    data12 <- filter(data12, State.Postal == "NC")
-    data12$FIPS <- sprintf("%03d", data12$FIPS - 37000)
-    data12 <- data12[2:nrow(data12),]
-    data12$RomneyPct <- as.numeric(data12$RomneyPct)
-    data12$ObamaPct <- as.numeric(data12$ObamaPct)
-    data12 <- rename(data12, COUNTYFP = FIPS)
-    
-    data12$RomneyWin <- data12$Romney > data12$Obama
-    data12$RomneyPctVictory <- data12$RomneyPct - data12$ObamaPct 
-    data12[,1:2] <- NULL
-    data12<<-data12
-    data <- merge(data,data12)
-})
+
   st_fips <- read.csv("st_fips.csv")
 
   #IMPORT AND MERGE DRUG DATA
-    drug <- read.csv(file = "cty_drug.csv", header = T, sep = ",")
-    getDrugs<-reactive({
-    data<-get2012()
-    drug <- drug[drug$State == input$chooseStates & drug$Year == 2014,]
-    names(drug)[8] <- "AdjDrugDeathRate"
-    drug <- rename(drug, COUNTYFP = FIPS)
-    drug$FIPS <- drug$COUNTYFP - 37000
-    drug$FIPS <- sprintf("%03d", drug$COUNTYFP)
-    drug <- select(drug, FIPS, AdjDrugDeathRate)
-    data <- merge(data, drug)
-    })
+   
 
   
   drugDeathBin <- function(x){
@@ -85,22 +47,24 @@ get2012<-reactive({
   states <- states[states$STATEFP == number,]
   })
   getData<-reactive({
-  data<-getDrugs()
+  data <- read.csv("data.csv", header = T, sep = ",")
+  
   states<-getStates()
   data <- data[order(order(as.numeric(as.character(states$COUNTYFP )))),]
-  ncounty <<- length(states$COUNTYFP)
-  data$DDR <- mapply(drugDeathBin, data$AdjDrugDeathRate)
-  
-  m1 <- lm(TrumpPctVictory ~ DDR, data)
+  ncounty <- length(states$COUNTYFP)
+
+  m1 <- lm(gop_margin_2016 ~ DrugDeathRate, data)
   data$m1.residuals <- resid(m1)
   
-  m2 <- lm(TrumpPctVictory ~ RomneyPctVictory, data)
+  m2 <- lm(gop_margin_2016 ~ gop_margin_2012, data)
   data$m2.residuals <- resid(m2)
   
   data$rnorm <- rnorm(ncounty)
-  m3 <- lm(TrumpPctVictory ~ rnorm, data)
+  m3 <- lm(gop_margin_2016 ~ rnorm, data)
   data$m3.residuals <- resid(m3)
-  data<<-data
+  data$winner <- "Hillary"
+  data$winner[data$TrumpWin==1] <- "Trump"
+  data<-data
   })
   #MAKE SHAPES
   shape_file <- "cb_2015_us_county_20m/cb_2015_us_county_20m.shp"
@@ -112,6 +76,9 @@ get2012<-reactive({
   output$myMapper<-renderLeaflet({
     data<-getData()
     states<-getStates()
+    
+    data <- data[order(order(as.numeric(as.character(states$COUNTYFP )))),]
+    ncounty <- length(states$COUNTYFP)
   color <- rep('blue',ncounty)
   color[data$TrumpWin == 1]<- 'red'
   leaflet(states) %>%
@@ -132,21 +99,56 @@ get2012<-reactive({
 
   
   ##Drug death rates
-  color <- colorBin("YlOrRd", data$DDR , bins = 8)(data$DDR)
-  
+  output$drugMap<-renderLeaflet({
+    data<-getData()
+    states<-getStates()
+    data <- data[order(order(as.numeric(as.character(states$COUNTYFP )))),]
+    ncounty <- length(states$COUNTYFP)
+    if(input$whatData=="drugs"){
+      
+  color <- colorBin("YlOrRd", data$DrugDeathRate , bins = 8)(data$DrugDeathRate)
+    }
+    else if(input$whatData=="2016Results"){
+      color <- rep('blue',ncounty)
+      color[data$TrumpWin == 1]<- 'red'
+    }
   leaflet(states) %>%
     addPolygons( stroke = T, fillOpacity =.7, smoothFactor = 0, color = "black",
-                 weight = .5, fill = T, fillColor = ~color
-    )
-  
+                 weight = .5, fill = T, fillColor = ~color)
+    
+  })
+
+
+  getMap<-function()({
+    data<-getData()
+    states<-getStates()
+    data <- data[order(order(as.numeric(as.character(states$COUNTYFP )))),]
+    ncounty <- length(states$COUNTYFP)
+    color <- colorBin("YlOrRd", data$DrugDeathRate , bins = 8)(data$DrugDeathRate)
+   
+    leaflet(states) %>%
+      addPolygons( stroke = T, fillOpacity =.7, smoothFactor = 0, color = "black",
+                   weight = .5, fill = T, fillColor = color
+      )
+    
+    
+  })
   
   #Correlation of drug death rates & trump victory margin
+  output$drugsTrump<-renderLeaflet({
+    data<-getData()
+    states<-getStates()
+    
+    data <- data[order(order(as.numeric(as.character(states$COUNTYFP )))),]
+    ncounty <- length(states$COUNTYFP)
   color <- colorBin("YlOrRd", data$m1.residuals^2 , bins = 8)(data$m1.residuals^2)
   
   leaflet(states) %>%
     addPolygons( stroke = T, fillOpacity =.7, smoothFactor = 0, color = "black",
                  weight = .5, fill = T, fillColor = ~color
     )
+  })
+  output$mapRomney<-renderLeaflet({
   
   #Correlation of romney victory margin & trump victory margin
   color <- colorBin("YlOrRd", data$m2.residuals^2 , bins = 5)(data$m2.residuals^2)
@@ -155,7 +157,9 @@ get2012<-reactive({
     addPolygons( stroke = T, fillOpacity =.7, smoothFactor = 0, color = "black",
                  weight = .5, fill = T, fillColor = ~color
     )
-
+})
+  output$mapRandom<-renderLeaflet({
+    
   ##Correlation w/ Random Number
   color <- colorBin("YlOrRd", data$m3.residuals^2 , bins = 5)(data$m3.residuals^2)
   
@@ -163,19 +167,20 @@ get2012<-reactive({
     addPolygons( stroke = T, fillOpacity =.7, smoothFactor = 0, color = "black",
                  weight = .5, fill = T, fillColor = ~color
     )
-  
+  })
+  output$mapRandomer<-renderLeaflet({
     color <- colorBin("YlOrRd", data$m3.residuals^2 , bins = 5)(data$m3.residuals^2)
     
     leaflet(states) %>%
       addPolygons( stroke = T, fillOpacity =.7, smoothFactor = 0, color = "black",
                    weight = .5, fill = T, fillColor = ~color
       )
-    
+  })
   
   ##BOXPLOTS
   output$graphTwo<-renderPlot({
     
-  bp <- ggplot(data = data, aes(x=data$DDR, y=TrumpPctVictory), order(as.numeric(data$DDR))) + geom_boxplot(aes(fill=AdjDrugDeathRate) ) 
+  bp <- ggplot(data = data, aes(x=data$DrugDeathRate, y=gop_margin_2016), order(as.numeric(data$DrugDeathRate))) + geom_boxplot(aes(fill=DrugDeathRate) ) 
   
   bp <- bp + xlab( "Age-Adjusted drug deaths per 100,000 people") +
     ylab("Trump Victory Margin")       
@@ -186,13 +191,14 @@ get2012<-reactive({
   
   ##BAR GRAPH
   output$graphThree <-renderPlot({
-    data$winner <- factor(data$winner)
-    data$winner <- factor(data$winner, levels = rev(levels(data$winner)))
-    bp2 <- ggplot(data, aes(DDR, fill = winner, order = as.numeric(DDR))) +
+   # data$winner16 <- factor(data$winner16)
+    #data$winner16 <- factor(data$winner16, levels = rev(levels(data$winner16)))
+    data<-getData()
+    bp2 <- ggplot(data, aes(DrugDeathRateCategory, fill = winner, order = as.numeric(DrugDeathRateCategory))) +
       geom_bar()
-    bp2 <<- bp2 + xlab( "Age-Adjusted drug deaths per 100,000 people") +
+    bp2 <- bp2 + xlab( "Age-Adjusted drug deaths per 100,000 people") +
       ylab("Number of Counties")       
-    bp2 + ggtitle("2016 Election victor in North Carolina counties by county drug overdose rate")
+    bp2 + ggtitle("2016 Election victor in State counties by county drug overdose rate")
   })
   ##REGRESSIONS
   getSummary<-renderText({
@@ -201,5 +207,18 @@ get2012<-reactive({
   cor(data$TrumpPctVictory, data$DDR)
   summary(lm(TrumpPctVictory ~ DDR, data[data$RomneyWin == F,])) ##effect of drug death on obama counties
 })
+  output$downloadMap <- downloadHandler(
+    filename = function() { paste(input$chooseStates, '.png', sep='') },
+    content = function(file) {
+      # temporarily switch to the temp dir, in case you do not have write
+      # permission to the current working directory
+     # owd <- setwd(tempdir())
+      #on.exit(setwd(owd))
+      
+      saveWidget(getMap(), "temp.html", selfcontained = FALSE)
+      webshot("temp.html", file = file, cliprect = "viewport")
+    }
+  )
+    
 })
   
