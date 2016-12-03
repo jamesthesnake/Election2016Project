@@ -27,7 +27,7 @@ tabsetPanel(
 
   tabPanel("Instructions", textOutput("text1") ,textOutput("text2"),textOutput("text3")),
   tabPanel("Graph", plotOutput("graphTwo")),
-  tabPanel(" Label Heatmap", leafletOutput("genMap")),
+#  tabPanel(" Label Heatmap", leafletOutput("genMap")),
   tabPanel("Custom Heatmap", leafletOutput("drugMap")),
   tabPanel("Plot with Drug Rates",plotOutput("graphThree"))
 )
