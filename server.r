@@ -13,6 +13,7 @@ server<-shinyServer(function(input, output){
   #IMPORT DATA
   output$text1<-renderText({ "research the 2016 election using custom metrics and color schemes"})
   output$text2<-renderText({ "for the customt tab , select your area for data and see the heatmap on custom sdie wrok"})
+  output$text3<-renderText({ "labels will be added in the label heatmap"})
   
   #IMPORT ELECTION DATA 2016
  
@@ -25,7 +26,6 @@ server<-shinyServer(function(input, output){
   #IMPORT AND MERGE DRUG DATA
    
 
-  
   drugDeathBin <- function(x){
     if(x == "0-2") return(1)
     if(x == "2.1-4") return(3)
@@ -41,18 +41,25 @@ server<-shinyServer(function(input, output){
   }
   
   getStates<-reactive({
-  number<-st_fips[st_fips$State== input$chooseStates,]$FIPS
-    
   states <- readOGR(dsn="cb_2015_us_county_20m",layer="cb_2015_us_county_20m")
+  states<-states[states$STATEFP!=72,]
+  states<-states[as.character(states$STATEFP)!="02",]
+  states<-states[states$NAME!="Kalawao",]
+  
+  if(input$individualState){
+  number<-st_fips[st_fips$State== input$chooseStates,]$FIPS
   states <- states[states$STATEFP == number,]
+  }
+  states$FULLFP<-paste0(states$STATEFP,states$COUNTYFP)
+  states<-states
   })
   getData<-reactive({
   data <- read.csv("data.csv", header = T, sep = ",")
   
   states<-getStates()
-  data <- data[order(order(as.numeric(as.character(states$COUNTYFP )))),]
+  data <- data[order(order(as.numeric(as.character(states$COUNTYFP)))),]
   ncounty <- length(states$COUNTYFP)
-
+  
   m1 <- lm(gop_margin_2016 ~ DrugDeathRate, data)
   data$m1.residuals <- resid(m1)
   
@@ -64,67 +71,164 @@ server<-shinyServer(function(input, output){
   data$m3.residuals <- resid(m3)
   data$winner <- "Hillary"
   data$winner[data$TrumpWin==1] <- "Trump"
+ 
   data<-data
   })
-  #MAKE SHAPES
-  shape_file <- "cb_2015_us_county_20m/cb_2015_us_county_20m.shp"
-  
-  
-  
-  
   ##Winners
   output$myMapper<-renderLeaflet({
     data<-getData()
+ 
     states<-getStates()
-    
-    data <- data[order(order(as.numeric(as.character(states$COUNTYFP )))),]
+    if(input$individualState){
+      data<-data[data$StateFIPS==states$STATEFP,]
+    }
+    #data <- data[order(order(as.numeric(as.character(states$COUNTYFP)))),]
     ncounty <- length(states$COUNTYFP)
+  if(input$whatData=="2016Results"){
   color <- rep('blue',ncounty)
   color[data$TrumpWin == 1]<- 'red'
+  }
+  else if(input$whatData=="drugs"){
+    color <- colorBin(input$chooseColor, data$DrugDeathRate , bins = 8)(data$DrugDeathRate)
+    
+  }
+  else if (input$whatData=="RomTrump"){
+    color <- colorBin(input$chooseColor, data$m2.residuals^2 , bins = 5)(data$m2.residuals^2)
+  }
+  map<-{  
   leaflet(states) %>%
     addPolygons( stroke = T, fillOpacity =.7, smoothFactor = 0, color = "black",
                  weight = .5, fill = T, fillColor = color
     )
+  }
+  if(input$labelYes){
+    longLat<-read.csv("us_cty_area.csv")
+    abbStates<-read.csv("states.csv")
+
+    if(input$individualState){
+      intial<-abbStates$Abbreviation[which(abbStates$State==input$chooseStates)]
+      
+      long<-data$long[data$StateCode==toString(intial)]
+      lat<-data$lat[data$StateCode==toString(intial)]
+    }
+    else{
+
+      long<-data$long
+      lat<-data$lat
+    }
+    map<- map%>%
+      addLabelOnlyMarkers(~lat, ~long, label =  ~as.character(states$NAME), 
+                          labelOptions = labelOptions(noHide = T, direction = 'top', textOnly = T))
+  }
+  if(input$legendYes){
+      if(input$whatData=="drugs"){
+        domainData<-data$DrugDeathRate
+      }
+      if(input$whatData=="RomTrump"){
+       domainData<- c(seq(1, 100, by=1))
+
+      }
+      pal <- colorNumeric(
+        palette = input$chooseColor,
+        domain = data$DrugDeathRate
+      )
+      map<-map%>%
+        addLegend("bottomright", pal = pal, values = domainData,
+                  title = input$whatData,
+                  opacity = 1
+        )
+  }
+  map<-map
   })
 
-   # color <- rep('blue',ncounty)
-    #color[data$TrumpWin == 1]<- 'red'
-    
-    #leaflet(states) %>%
-    #addPolygons( stroke = T, fillOpacity =.7, smoothFactor = 0, color = "black",
-     #            weight = .5, fill = T, fillColor = color
-    #)
-    
   
 
   
   ##Drug death rates
   output$drugMap<-renderLeaflet({
     data<-getData()
+    
     states<-getStates()
-    data <- data[order(order(as.numeric(as.character(states$COUNTYFP )))),]
+    if(input$individualState){
+      data<-data[data$StateFIPS==states$STATEFP,]
+    }
+    data <- data[order(order(as.numeric(as.character(states$COUNTYFP)))),]
     ncounty <- length(states$COUNTYFP)
+    print("top")
     if(input$whatData=="drugs"){
-      
-  color <- colorBin("YlOrRd", data$DrugDeathRate , bins = 8)(data$DrugDeathRate)
+  color <- colorBin(input$chooseColor, data$DrugDeathRate , bins = 8)(data$DrugDeathRate)
     }
     else if(input$whatData=="2016Results"){
       color <- rep('blue',ncounty)
       color[data$TrumpWin == 1]<- 'red'
     }
+    else if (input$whatData == "RomTrump"){
+      color <- colorBin(input$chooseColor, data$m2.residuals^2 , bins = 5)(data$m2.residuals^2)
+      
+    }
+    if(input$whatData=="2016Results"){
+      color <- rep('blue',ncounty)
+      color[data$TrumpWin == 1]<- 'red'
+    }  
+  map<-{
   leaflet(states) %>%
     addPolygons( stroke = T, fillOpacity =.7, smoothFactor = 0, color = "black",
                  weight = .5, fill = T, fillColor = ~color)
+  }
+  if(input$labelYes){
+    longLat<-read.csv("us_cty_area.csv")
+    abbStates<-read.csv("states.csv")
+    print(input$individualState)
+    print("here")
+    print(data$StateCode)
+    if(input$individualState){
+      intial<-abbStates$Abbreviation[which(abbStates$State==input$chooseStates)]
+      
+      long<-data$long[data$StateCode==toString(intial)]
+      lat<-data$lat[data$StateCode==toString(intial)]      
+      print(length(states$NAME))
+    }
+    else{
+
+      long<-data$long
+      lat<-data$lat
+    }
+    print(long)
+    print(lat)
+    map<-map%>%
+      addLabelOnlyMarkers(~lat, ~long, label =  ~as.character(states$NAME), 
+                          labelOptions = labelOptions(noHide = T, direction = 'top', textOnly = T))
+  }
+  if(input$legendYes){
+    pal <- colorNumeric(
+      palette = input$chooseColor,
+      domain = data$DrugDeathRate
+    )
     
+    map<-map%>%
+      addLegend("bottomright", pal = pal, values = data$DrugDeathRate,
+                title = input$whatData,
+                opacity = 1
+      )
+    
+  }
+  else{
+    map<-map
+  }
+  map<-map
   })
 
 
   getMap<-function()({
     data<-getData()
+   
     states<-getStates()
-    data <- data[order(order(as.numeric(as.character(states$COUNTYFP )))),]
+    if(input$individualState){
+      data<-data[data$StateFIPS==states$STATEFP,]
+    }
+    #data <- data[order(order(as.numeric(as.character(states$FULLFP )))),]
     ncounty <- length(states$COUNTYFP)
-    color <- colorBin("YlOrRd", data$DrugDeathRate , bins = 8)(data$DrugDeathRate)
+    color <- colorBin(input$chooseColor, data$DrugDeathRate , bins = 8)(data$DrugDeathRate)
    
     leaflet(states) %>%
       addPolygons( stroke = T, fillOpacity =.7, smoothFactor = 0, color = "black",
@@ -139,9 +243,9 @@ server<-shinyServer(function(input, output){
     data<-getData()
     states<-getStates()
     
-    data <- data[order(order(as.numeric(as.character(states$COUNTYFP )))),]
+  #  data <- data[order(order(as.numeric(as.character(states$COUNTYFP )))),]
     ncounty <- length(states$COUNTYFP)
-  color <- colorBin("YlOrRd", data$m1.residuals^2 , bins = 8)(data$m1.residuals^2)
+  color <- colorBin(input$chooseColor, data$m1.residuals^2 , bins = 8)(data$m1.residuals^2)
   
   leaflet(states) %>%
     addPolygons( stroke = T, fillOpacity =.7, smoothFactor = 0, color = "black",
@@ -151,17 +255,48 @@ server<-shinyServer(function(input, output){
   output$mapRomney<-renderLeaflet({
   
   #Correlation of romney victory margin & trump victory margin
-  color <- colorBin("YlOrRd", data$m2.residuals^2 , bins = 5)(data$m2.residuals^2)
+  color <- colorBin(input$chooseColor, data$m2.residuals^2 , bins = 5)(data$m2.residuals^2)
   
   leaflet(states) %>%
     addPolygons( stroke = T, fillOpacity =.7, smoothFactor = 0, color = "black",
                  weight = .5, fill = T, fillColor = ~color
     )
 })
-  output$mapRandom<-renderLeaflet({
+  output$genMap<-renderLeaflet({
+    map<-getGenMap()
+    states<-getStates()
+    data<-getData()
+    if(input$individualState){
+      data<-data[data$StateFIPS==states$STATEFP,]
+    }
+    abbStates<-read.csv("states.csv")
+    if(input$individualState){
+    intial<-abbStates$Abbreviation[which(abbStates$State==input$chooseStates)]
     
+    long<-data$long[data$StateCode==toString(intial)]
+    lat<-data$lat[data$StateCode==toString(intial)]    
+    }
+    else{
+      
+      long<-data$long
+      lat<-data$lat
+    }
+    map%>%
+          addLabelOnlyMarkers(~lat, ~long, label =  ~as.character(states$NAME), 
+                                                       labelOptions = labelOptions(noHide = T, direction = 'top', textOnly = T))
+    
+    
+  })
+  getGenMap<-reactive({
+    data<-getData()
+    states<-getStates()
+    if(input$individualState){
+     # data<-data[data$StateFIPS==states$STATEFP,]
+    }
+    data <- data[order(order(as.numeric(as.character(states$FULLFP )))),]
+    ncounty <- length(states$COUNTYFP)
   ##Correlation w/ Random Number
-  color <- colorBin("YlOrRd", data$m3.residuals^2 , bins = 5)(data$m3.residuals^2)
+  color <- colorBin(input$chooseColor, data$m3.residuals^2 , bins = 5)(data$m3.residuals^2)
   
   leaflet(states) %>%
     addPolygons( stroke = T, fillOpacity =.7, smoothFactor = 0, color = "black",
@@ -169,7 +304,7 @@ server<-shinyServer(function(input, output){
     )
   })
   output$mapRandomer<-renderLeaflet({
-    color <- colorBin("YlOrRd", data$m3.residuals^2 , bins = 5)(data$m3.residuals^2)
+    color <- colorBin(input$chooseColor, data$m3.residuals^2 , bins = 5)(data$m3.residuals^2)
     
     leaflet(states) %>%
       addPolygons( stroke = T, fillOpacity =.7, smoothFactor = 0, color = "black",
@@ -212,8 +347,8 @@ server<-shinyServer(function(input, output){
     content = function(file) {
       # temporarily switch to the temp dir, in case you do not have write
       # permission to the current working directory
-     # owd <- setwd(tempdir())
-      #on.exit(setwd(owd))
+       owd <- setwd(tempdir())
+      on.exit(setwd(owd))
       
       saveWidget(getMap(), "temp.html", selfcontained = FALSE)
       webshot("temp.html", file = file, cliprect = "viewport")
