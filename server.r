@@ -8,12 +8,16 @@ library (leaflet)
 library(shiny)
 library(ggplot2)
 library(webshot)
+library(mapview)
+
 server<-shinyServer(function(input, output){
   
   #IMPORT DATA
   output$text1<-renderText({ "research the 2016 election using custom metrics and color schemes"})
   output$text2<-renderText({ "for the customt tab , select your area for data and see the heatmap on custom sdie wrok"})
   output$text3<-renderText({ "labels will be added in the label heatmap"})
+  output$text4<-renderText({ "By James Hennessy and Benjamin Berger"})
+  
   
   #IMPORT ELECTION DATA 2016
  
@@ -39,7 +43,11 @@ server<-shinyServer(function(input, output){
     if(x == "18.1-20") return(19)
     if(x == ">20") return(21)
   }
-  
+  getCongress<-reactive({
+    cong<-readOGR(dsn="cb_2014_us_cd114_20m",layer="cb_2014_us_cd114_20m")
+    
+    
+  })
   getStates<-reactive({
   states <- readOGR(dsn="cb_2015_us_county_20m",layer="cb_2015_us_county_20m")
   states<-states[states$STATEFP!=72,]
@@ -49,52 +57,83 @@ server<-shinyServer(function(input, output){
   
     if(input$individualState){
     number<-st_fips[st_fips$State== input$chooseStates,]$FIPS
+    if(number<10){
+      number<-as.character(number)
+      number<-paste0("0",number)
+      states <- states[states$STATEFP == number,]
+      
+    }
+    else{
     states <- states[states$STATEFP == number,]
     }
-  print("beta")
+    }
   states<-states
   })
   getData<-reactive({
   data <- read.csv("data.csv", header = T, sep = ",")
   states<-getStates()
-  numVec<-c(unique(states$STATEFP))
 
-  bcumVec<<-numVec
   if(input$individualState){
-  data <- data[data$StateFIPS==states$STATEFP,]
+    
+    num<-as.numeric(as.character(states$STATEFP))
+    if(num<10){
+      data<- data[data$StateFIPS==num,]
+    }
+    else{
+    data <- data[data$StateFIPS==states$STATEFP,]
+    }
+    data<-data
   }
-  bets<<-data
   ncounty <- length(states$COUNTYFP)
-  print(ncounty)
   m1 <- lm(gop_margin_2016 ~ DrugDeathRate, data)
   data$m1.residuals <- resid(m1)
   
   m2 <- lm(gop_margin_2016 ~ gop_margin_2012, data)
   data$m2.residuals <- resid(m2)
-  print(length(data$m2.residuals))
   data$rnorm <- rnorm(ncounty)
   m3 <- lm(gop_margin_2016 ~ rnorm, data)
   data$m3.residuals <- resid(m3)
+  m4<-lm(gop_margin_2016~BlackShare,data)
+  data$m4.residuals<- resid(m4)
   data$winner <- "Hillary"
   data$winner[data$TrumpWin==1] <- "Trump"
   
-  dets<<-data
   data<-data
   
   })
 
-  
+  output$CongMap<- renderLeaflet({
+    cong<-getCongress()
+    data<-getData()
+    data <- data[order(order(as.numeric(as.character(cong$GEOID)))),]
+    color <- colorBin(input$chooseColor, data$m4.residuals^2 , bins = 5)(data$m4.residuals^2)
+    leaflet(cong) %>%
+        addPolygons( stroke = T, fillOpacity =.7, smoothFactor = 0, color = "black",
+                     weight = .5, fill = T, fillColor = ~color)
+    
+  })
 
   
   ##Drug death rates
   output$drugMap<-renderLeaflet({
+    finalMap<-finalMap()
+  })
+  finalMap<-reactive({
     data<-getData()
     
     states<-getStates()
    
     data <- data[order(order(as.numeric(as.character(states$GEOID)))),]
     if(input$individualState){
-      data<-data[data$StateFIPS==states$STATEFP,]
+      
+      num<-as.numeric(as.character(states$STATEFP))
+      if(num<10){
+        data<- data[data$StateFIPS==num,]
+      }
+      else{
+        data <- data[data$StateFIPS==states$STATEFP,]
+      }
+      data<-data
     }
     ncounty <- length(states$COUNTYFP)
 
@@ -109,6 +148,11 @@ server<-shinyServer(function(input, output){
       color <- colorBin(input$chooseColor, data$m2.residuals^2 , bins = 5)(data$m2.residuals^2)
       
     }
+    else if(input$whatData=="blackPop"){
+      color <- colorBin(input$chooseColor, data$BlackShare , bins = 8)(data$BlackShare)
+      
+      
+    }
     if(input$whatData=="2016Results"){
       color <- rep('blue',ncounty)
       color[data$TrumpWin == 1]<- 'red'
@@ -121,35 +165,40 @@ server<-shinyServer(function(input, output){
   if(input$labelYes){
     longLat<-read.csv("us_cty_area.csv")
     abbStates<-read.csv("states.csv")
-    print(input$individualState)
-    print("here")
-    print(data$StateCode)
     if(input$individualState){
       intial<-abbStates$Abbreviation[which(abbStates$State==input$chooseStates)]
       
       long<-data$long[data$StateCode==toString(intial)]
       lat<-data$lat[data$StateCode==toString(intial)]      
-      print(length(states$NAME))
     }
     else{
 
       long<-data$long
       lat<-data$lat
     }
-    print(long)
-    print(lat)
     map<-map%>%
       addLabelOnlyMarkers(~lat, ~long, label =  ~as.character(states$NAME), 
                           labelOptions = labelOptions(noHide = T, direction = 'top', textOnly = T))
   }
   if(input$legendYes){
+    if(input$whatData=="2016Results"){
+      print("hello")
+      pal<- colorFactor(c("blue","red"),
+      domain= c("Hillary","Trump"))
+      value<-c("Hillary","Trump")
+    }
+    else{
     pal <- colorNumeric(
-      palette = input$chooseColor,
+    
+      palette   = input$chooseColor,
       domain = data$DrugDeathRate
     )
-    
+    value<-data$DrugDeathRate
+    }
+    value<-value
+    pal<-pal
     map<-map%>%
-      addLegend("bottomright", pal = pal, values = data$DrugDeathRate,
+      addLegend("bottomright", pal = pal, values = value,
                 title = input$whatData,
                 opacity = 1
       )
@@ -169,6 +218,7 @@ server<-shinyServer(function(input, output){
       # data<-data[data$StateFIPS==states$STATEFP,]
     }
     ncounty <- length(states$COUNTYFP)
+    
     color <- colorBin(input$chooseColor, data$DrugDeathRate , bins = 8)(data$DrugDeathRate)
     
     leaflet(states) %>%
@@ -203,8 +253,6 @@ server<-shinyServer(function(input, output){
       long<-data$long
       lat<-data$lat
     }
-    print(input$chooseStates)
-    print(data$StateCode)
  
     map%>%
           addLabelOnlyMarkers(~lat, ~long, label =  ~as.character(states$NAME), 
@@ -239,7 +287,7 @@ server<-shinyServer(function(input, output){
   
   ##BOXPLOTS
   output$graphTwo<-renderPlot({
-    
+  data<-getData()
   bp <- ggplot(data = data, aes(x=data$DrugDeathRate, y=gop_margin_2016), order(as.numeric(data$DrugDeathRate))) + geom_boxplot(aes(fill=DrugDeathRate) ) 
   
   bp <- bp + xlab( "Age-Adjusted drug deaths per 100,000 people") +
@@ -267,18 +315,48 @@ server<-shinyServer(function(input, output){
   cor(data$TrumpPctVictory, data$DDR)
   summary(lm(TrumpPctVictory ~ DDR, data[data$RomneyWin == F,])) ##effect of drug death on obama counties
 })
+  
+  observeEvent(input$saveButton,{
+    themap<- finalMap()
+    saveWidget(themap, file="temp.html", selfcontained = F) 
+    webshot("temp.html", file = "Rplot.png",
+            cliprect = "viewport")
+    
+  })
+  
   output$downloadMap <- downloadHandler(
-    filename = function() { paste(input$chooseStates, '.png', sep='') },
+    filename = 'plot.pdf',
+    
     content = function(file) {
       # temporarily switch to the temp dir, in case you do not have write
       # permission to the current working directory
-       owd <- setwd(tempdir())
+      owd <- setwd(tempdir())
       on.exit(setwd(owd))
-      
-      saveWidget(getMap(), "temp.html", selfcontained = FALSE)
-      webshot("temp.html", file = file, cliprect = "viewport")
+      #mapshot(try,file = paste0(getwd(), "/plot.pdf"))
+      saveWidget(finalMap(), "temp.html", selfcontained = FALSE)
+      webshot("temp.html", file = file,
+              cliprect = "viewport")
     }
-  )
+    )
+  output$downloadData <- downloadHandler({
     
+    # This function returns a string which tells the client
+    # browser what name to use when saving the file.
+    filename = function() {
+      paste(input$chooseStates, ".csv", sep = ".")
+    }
+    
+    # This function should write data to a file given to it by
+    # the argument 'file'.
+    content = function(file) {
+      
+      sep <- ","
+      
+      # Write to a file specified by the 'file' argument
+      write.table("data.csv", file, sep = sep,
+                  row.names = FALSE)
+    }
+    
+  })
 })
   
