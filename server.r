@@ -317,25 +317,21 @@ server<-shinyServer(function(input, output){
 })
   
   observeEvent(input$saveButton,{
-    themap<- finalMap()
-    saveWidget(themap, file="temp.html", selfcontained = F) 
+    here<-finalMap()
+    saveWidget(here, file="temp.html", selfcontained = F) 
     webshot("temp.html", file = "Rplot.png",
             cliprect = "viewport")
+    
     
   })
   
   output$downloadMap <- downloadHandler(
-    filename = 'plot.pdf',
+    filename = 'Rplot.png',
     
     content = function(file) {
       # temporarily switch to the temp dir, in case you do not have write
       # permission to the current working directory
-      owd <- setwd(tempdir())
-      on.exit(setwd(owd))
-      #mapshot(try,file = paste0(getwd(), "/plot.pdf"))
-      saveWidget(finalMap(), "temp.html", selfcontained = FALSE)
-      webshot("temp.html", file = file,
-              cliprect = "viewport")
+      file.copy("Rplot.png",file)
     }
     )
   output$downloadData <- downloadHandler({

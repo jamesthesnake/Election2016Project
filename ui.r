@@ -21,9 +21,11 @@ ui <-shinyUI(pageWithSidebar(
     selectInput("whatFormat","Chooseformat to download map", c("png","pdf","html")),
     checkboxInput("labelYes", "put Labels on the map"),
     checkboxInput("legendYes", "put a Legend on the map"),
-    downloadButton("downloadMap","download Map"),
     actionButton("saveButton", "Save"),
-    
+    conditionalPanel(
+      condition = "input.saveButton == true",
+    downloadButton("downloadMap","download Map")
+    ),
     downloadButton("downloadOutput","download csv")
     
     ),mainPanel(
