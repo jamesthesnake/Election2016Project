@@ -22,10 +22,12 @@ ui <-shinyUI(pageWithSidebar(
     checkboxInput("labelYes", "put Labels on the map"),
     checkboxInput("legendYes", "put a Legend on the map"),
     actionButton("saveButton", "Save"),
-    conditionalPanel(
-      condition = "input.saveButton == true",
-    downloadButton("downloadMap","download Map")
-    ),
+  #  conditionalPanel(
+   #   condition = "input.saveButton == true",
+    downloadButton("downloadMap","download Map"),
+  downloadButton("downloadMapTwo","download Map Two"),
+  
+    #),
     downloadButton("downloadOutput","download csv")
     
     ),mainPanel(

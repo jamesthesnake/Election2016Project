@@ -1,5 +1,5 @@
 rm(list = ls())
-
+library(rmarkdown)
 library(dplyr) 
 library(rgdal)
 library(htmlwidgets)
@@ -9,7 +9,6 @@ library(shiny)
 library(ggplot2)
 library(webshot)
 library(mapview)
-
 server<-shinyServer(function(input, output){
   
   #IMPORT DATA
@@ -17,6 +16,7 @@ server<-shinyServer(function(input, output){
   output$text2<-renderText({ "for the customt tab , select your area for data and see the heatmap on custom sdie wrok"})
   output$text3<-renderText({ "labels will be added in the label heatmap"})
   output$text4<-renderText({ "By James Hennessy and Benjamin Berger"})
+
   
   
   #IMPORT ELECTION DATA 2016
@@ -182,7 +182,6 @@ server<-shinyServer(function(input, output){
   }
   if(input$legendYes){
     if(input$whatData=="2016Results"){
-      print("hello")
       pal<- colorFactor(c("blue","red"),
       domain= c("Hillary","Trump"))
       value<-c("Hillary","Trump")
@@ -315,25 +314,60 @@ server<-shinyServer(function(input, output){
   cor(data$TrumpPctVictory, data$DDR)
   summary(lm(TrumpPctVictory ~ DDR, data[data$RomneyWin == F,])) ##effect of drug death on obama counties
 })
-  
-  observeEvent(input$saveButton,{
+  saveFile<-function(){
     here<-finalMap()
-    saveWidget(here, file="temp.html", selfcontained = F) 
+    saveWidget(here, file="temp.html", selfcontained = T) 
     webshot("temp.html", file = "Rplot.png",
             cliprect = "viewport")
+  }
+  observeEvent(input$saveButton,{
+    saveFile()
     
     
   })
-  
+  require(webshot)
   output$downloadMap <- downloadHandler(
+    filename = 'temp.html',
+    
+    content = function(file) {
+#      src <- normalizePath('report.Rmd')
+      
+      here<-finalMap()
+      owd <- setwd(tempdir())
+      on.exit(setwd(owd))
+      saveWidget(here, file="temp.html", selfcontained = T) 
+      
+      webshot("temp.html", file = "Rplot.png",
+             cliprect = "viewport")
+      #file.copy(src, 'Rplot.png', overwrite = TRUE)
+      
+      
+      # temporarily switch to the temp dir, in case you do not have write
+      # permission to the current working directory
+      file.copy("temp.html",file,overwrite = TRUE)
+    }
+    )
+  output$downloadMapTwo <- downloadHandler(
     filename = 'Rplot.png',
     
     content = function(file) {
+      #      src <- normalizePath('report.Rmd')
+      
+      here<-finalMap()
+      owd <- setwd(tempdir())
+      on.exit(setwd(owd))
+      saveWidget(here, file="temp.html", selfcontained = T) 
+      
+      webshot("temp.html", file = "Rplot.png",
+              cliprect = "viewport")
+      #file.copy(src, 'Rplot.png', overwrite = TRUE)
+      
+      
       # temporarily switch to the temp dir, in case you do not have write
       # permission to the current working directory
-      file.copy("Rplot.png",file)
+      file.copy("Rplot.png",file,overwrite = TRUE)
     }
-    )
+  )
   output$downloadData <- downloadHandler({
     
     # This function returns a string which tells the client
