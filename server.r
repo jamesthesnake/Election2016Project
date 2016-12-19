@@ -8,15 +8,16 @@ library (leaflet)
 library(shiny)
 library(ggplot2)
 library(webshot)
-library(mapview)
 server<-shinyServer(function(input, output){
-  
+  webshot::install_phantomjs()
   #IMPORT DATA
   output$text1<-renderText({ "research the 2016 election using custom metrics and color schemes"})
   output$text2<-renderText({ "for the customt tab , select your area for data and see the heatmap on custom sdie wrok"})
   output$text3<-renderText({ "labels will be added in the label heatmap"})
   output$text4<-renderText({ "By James Hennessy and Benjamin Berger"})
-
+  
+  output$text6<-renderText({ "James Hennessy is a handsome and very talented dancer, who one day dreamed of being a Pokemon, but had to settle on something else due to copyright issues "})
+  output$text7<-renderText({"Benjamin Berger simply can't stack up to James at all! Here he is pictured below"})
   
   
   #IMPORT ELECTION DATA 2016
@@ -45,8 +46,79 @@ server<-shinyServer(function(input, output){
   }
   getCongress<-reactive({
     cong<-readOGR(dsn="cb_2014_us_cd114_20m",layer="cb_2014_us_cd114_20m")
+    cong<-cong[cong$STATEFP!=72,]
+    cong<-cong[as.character(cong$STATEFP)!="02",]
+    cong$NAME<-paste0(cong$STATEFP,cong$CD114FP)
+    if(input$individualState){
+      number<-st_fips[st_fips$State== input$chooseStates,]$FIPS
+      if(number<10){
+        number<-as.character(number)
+        number<-paste0("0",number)
+        cong <- cong[cong$STATEFP == number,]
+        
+      }
+      else{
+        cong <- cong[cong$STATEFP == number,]
+      }
+    }
+    cong<-cong
     
     
+  })
+  getCongResults<-reactive({
+    kos<-read.csv("Results.csv")
+    statesAbv <- read.csv("statesAbv.csv")
+    
+    names<-substr(kos$CD,1,2)
+    dist<-substr(kos$CD,4,5)
+    
+    for(i in 1:length(names)){
+      number<-statesAbv[which(names[i]==statesAbv$ABV),]$FIPS
+      if(number<10){
+        number<-as.character(number)
+        number<-paste0("0",number)
+        numberDist<-paste0(number,dist[i])
+        kos$CDfull[i]<-numberDist
+        kos$CDstate[i]<-number
+        kos$CDdist[i]<-dist[i]
+        
+        
+      }
+      else{
+        number<-as.character(number)
+        
+        numberDist<-paste0(number,dist[i])
+        kos$CDfull[i]<-numberDist
+        kos$CDstate[i]<-number
+        kos$CDdist[i]<-dist[i]
+        
+      }
+      if(!is.na(kos$Clinton.2016[i] )){
+      if((kos$Clinton.2016[i])<(kos$Trump.2016[i])){
+        kos$newWinner[i]<-"TRUE"
+      }
+      else{
+        kos$newWinner[i]<-"FALSE"
+      }
+    
+      }
+      else{
+        kos$newWinner[i]<-"NA"
+      }
+    }
+    if(input$individualState){
+      number<-st_fips[st_fips$State== input$chooseStates,]$FIPS
+      if(number<10){
+        number<-as.character(number)
+        number<-paste0("0",number)
+        kos<-kos[which(kos$CDstate==number),]
+        
+      }
+      else{
+        kos<-kos[which(kos$CDstate==number),]
+      }
+    }
+  kos<-kos  
   })
   getStates<-reactive({
   states <- readOGR(dsn="cb_2015_us_county_20m",layer="cb_2015_us_county_20m")
@@ -103,13 +175,78 @@ server<-shinyServer(function(input, output){
   })
 
   output$CongMap<- renderLeaflet({
+    finalCongMap()
+  })
+  finalCongMap<-reactive({
     cong<-getCongress()
+    congResults<-getCongResults()
+    for(i in 1:length(cong)){
+      index<-match(cong$NAME[i],congResults$CDfull)
+      cong$Incumbent[i]<-congResults$Incumbent[index]
+      cong$Party[i]<-congResults$Party[index]
+      cong$Csix[i]<-congResults$Clinton.2016[index]
+      cong$Tsix[i]<-congResults$Trump.2016[index]
+      cong$Ot[i]<-congResults$Obama.2012[index]
+      cong$Rt[i]<-congResults$Romney.2012[index]
+      
+    }
     data<-getData()
-    data <- data[order(order(as.numeric(as.character(cong$GEOID)))),]
-    color <- colorBin(input$chooseColor, data$m4.residuals^2 , bins = 5)(data$m4.residuals^2)
-    leaflet(cong) %>%
+    states<-getStates()
+    data <- data[order(order(as.numeric(as.character(states$GEOID)))),]
+    #color <- rep('blue',length(congResults))
+    #color[congResults$newWinner=="TRUE"]<- 'red'   
+    color <- colorBin(input$chooseColor, cong$Ot , bins = 8)(cong$Ot)
+
+    congMapper<-{
+      leaflet(cong) %>%
         addPolygons( stroke = T, fillOpacity =.7, smoothFactor = 0, color = "black",
                      weight = .5, fill = T, fillColor = ~color)
+      }
+    if(input$labelYes){
+      longLat<-read.csv("us_cty_area.csv")
+      abbStates<-read.csv("states.csv")
+      if(input$individualState){
+        intial<-abbStates$Abbreviation[which(abbStates$State==input$chooseStates)]
+        
+        long<-data$long[data$StateCode==toString(intial)]
+        lat<-data$lat[data$StateCode==toString(intial)]      
+      }
+      else{
+        
+        long<-data$long
+        lat<-data$lat
+      }
+     congMapper<-{ congMapper %>%
+        addLabelOnlyMarkers(~lat, ~long, label =  ~as.character(congResults$CD), 
+                            labelOptions = labelOptions(noHide = T, direction = 'top', textOnly = T))
+     }
+    }
+    if(input$legendYes){
+      if(input$whatData=="2016Results"){
+        pal<- colorFactor(c("blue","red"),
+                          domain= c("Hillary","Trump"))
+        value<-c("Hillary","Trump")
+      }
+      else{
+        pal <- colorNumeric(
+          
+          palette   = input$chooseColor,
+          domain = data$DrugDeathRate
+        )
+        value<-data$DrugDeathRate
+      }
+      value<-value
+      pal<-pal
+      congMapper<-congMapper%>%
+        addLegend("bottomright", pal = pal, values = value,
+                  title = input$whatData,
+                  opacity = 1
+        )
+      
+    }
+       
+    
+     congMapper<-congMapper
     
   })
 
@@ -150,6 +287,12 @@ server<-shinyServer(function(input, output){
     }
     else if(input$whatData=="blackPop"){
       color <- colorBin(input$chooseColor, data$BlackShare , bins = 8)(data$BlackShare)
+      
+      
+    }
+    
+    else if(input$whatData=="PopDensity"){
+      color <- colorBin(input$chooseColor, data$PopDensity , bins = 8)(data$PopDensity)
       
       
     }
@@ -232,7 +375,7 @@ server<-shinyServer(function(input, output){
   
   #Correlation of drug death rates & trump victory margin
   
-
+  
   output$genMap<-renderLeaflet({
     map<-getGenMap()
     states<-getStates()
@@ -252,12 +395,9 @@ server<-shinyServer(function(input, output){
       long<-data$long
       lat<-data$lat
     }
- 
     map%>%
           addLabelOnlyMarkers(~lat, ~long, label =  ~as.character(states$NAME), 
                                                        labelOptions = labelOptions(noHide = T, direction = 'top', textOnly = T))
-    
-    
   })
   getGenMap<-reactive({
     data<-getData()
@@ -314,58 +454,25 @@ server<-shinyServer(function(input, output){
   cor(data$TrumpPctVictory, data$DDR)
   summary(lm(TrumpPctVictory ~ DDR, data[data$RomneyWin == F,])) ##effect of drug death on obama counties
 })
-  saveFile<-function(){
-    here<-finalMap()
-    saveWidget(here, file="temp.html", selfcontained = T) 
-    webshot("temp.html", file = "Rplot.png",
-            cliprect = "viewport")
-  }
-  observeEvent(input$saveButton,{
-    saveFile()
-    
-    
-  })
-  require(webshot)
   output$downloadMap <- downloadHandler(
-    filename = 'temp.html',
-    
-    content = function(file) {
-#      src <- normalizePath('report.Rmd')
-      
-      here<-finalMap()
-      owd <- setwd(tempdir())
-      on.exit(setwd(owd))
-      saveWidget(here, file="temp.html", selfcontained = T) 
-      
-      webshot("temp.html", file = "Rplot.png",
-             cliprect = "viewport")
-      #file.copy(src, 'Rplot.png', overwrite = TRUE)
-      
-      
-      # temporarily switch to the temp dir, in case you do not have write
-      # permission to the current working directory
-      file.copy("temp.html",file,overwrite = TRUE)
-    }
-    )
-  output$downloadMapTwo <- downloadHandler(
-    filename = 'Rplot.png',
-    
+    filename = function() {
+      paste(input$chooseStates,input$whatFormat, sep='')
+    },
     content = function(file) {
       #      src <- normalizePath('report.Rmd')
-      
+
       here<-finalMap()
+      
+      long<-((input$drugMap_bounds$north)+input$drugMap_bounds$south)/2
+      latt<-((input$drugMap_bounds$west)+input$drugMap_bounds$east)/2
+ 
+      heres<-here%>% setView(lng=latt, lat=long,zoom=input$drugMap_zoom)
       owd <- setwd(tempdir())
       on.exit(setwd(owd))
-      saveWidget(here, file="temp.html", selfcontained = T) 
+      saveWidget(heres, file="temp.html", selfcontained = F) 
       
-      webshot("temp.html", file = "Rplot.png",
+      webshot("temp.html", file = file,
               cliprect = "viewport")
-      #file.copy(src, 'Rplot.png', overwrite = TRUE)
-      
-      
-      # temporarily switch to the temp dir, in case you do not have write
-      # permission to the current working directory
-      file.copy("Rplot.png",file,overwrite = TRUE)
     }
   )
   output$downloadData <- downloadHandler({
